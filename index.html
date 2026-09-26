@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<!--
+  Cognitive Drift & Academic Stress — Student Check-In
+  ------------------------------------------------------
+  KDU Research — NTPGB Upethra D/BCS/23/0021
+
+  WHAT THIS FILE IS
+  A single self-contained page (plain HTML/CSS/vanilla JS, no build step,
+  no framework) that collects the three-modality evaluation data
+  (self-talk text, voice recording, 15-item checklist) across three
+  gated sessions per student, using a Supabase project as the backend.
+
+  It does NOT run any ontology/NLP inference. It only captures and
+  stores raw data. Your reasoner.py / pipeline.py batch script processes
+  the saved rows afterwards, offline. This keeps the evaluation dataset
+  clean of any live-inference influence.
+
+  BEFORE YOU DEPLOY — fill in the three values below:
+    1. SUPABASE_URL      -> Project Settings > Data API > Project URL
+    2. SUPABASE_ANON_KEY -> Project Settings > Data API > anon/public key
+       (never put the service_role key here — this file is public)
+    3. Nothing else technical needs changing to go live, but see the
+       "TRANSLATIONS" section further down — the Sinhala and Tamil
+       consent/description text should still get a final check by a
+       native speaker (and your supervisor/ethics reviewer) before
+       real students see it, since consent wording has to be exactly
+       right.
+
+  HOW TO DEPLOY (free)
+    - Netlify: drag the whole "checkin" folder onto app.netlify.com/drop
+    - Vercel: `vercel` CLI in this folder, or import via the Vercel
+      dashboard as a static project (no framework preset needed)
+    - Either gives you a free https:// URL — required, since browsers
+      only allow microphone access (getUserMedia) on https or localhost.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Check-In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+Sinhala:wght@400;500;600&family=Noto+Sans+Tamil:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAF7F2;
+    --card: #FFFFFF;
+    --soft: #F1F5F3;
+    --primary: #2F7A6F;
+    --primary-dark: #235A52;
+    --text: #26343B;
+    --text-muted: #6B7A80;
+    --border: #E4E8E6;
+    --warn-bg: #FBF3E7;
+    --warn-text: #8A5A1E;
+    --radius: 18px;
+    --shadow: 0 8px 30px rgba(38, 52, 59, 0.08);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: linear-gradient(180deg, #FAF7F2 0%, #F3EFE7 100%);
+    font-family: 'Noto Sans', 'Noto Sans Sinhala', 'Noto Sans Tamil', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+  }
+
+  #app {
+    width: 100%;
+    max-width: 560px;
+  }
+
+  .screen {
+    display: none;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+  }
+  .screen.active {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 32px 28px;
+  }
+
+  .brand {
+    text-align: center;
+    margin-bottom: 22px;
+  }
+  .brand .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--primary);
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+  .brand h1 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+  }
+
+  h2.title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+  }
+  p.subtitle {
+    color: var(--text-muted);
+    margin: 0 0 24px;
+    line-height: 1.55;
+  }
+
+  label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin: 18px 0 6px;
+  }
+  label:first-of-type { margin-top: 0; }
+
+  input[type="text"],
+  input[type="email"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 13px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    font-size: 1rem;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--soft);
+    transition: border-color 0.2s ease;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+  textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-primary {
+    width: 100%;
+    padding: 15px;
+    margin-top: 24px;
+    background: var(--primary);
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 14px;
+    transition: background 0.2s ease, transform 0.1s ease;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
+  .btn-primary:active:not(:disabled) { transform: scale(0.98); }
+  .btn-primary:disabled {
+    background: #C8D3D0;
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    width: 100%;
+    padding: 13px;
+    margin-top: 10px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-radius: 14px;
+  }
+  .btn-secondary:hover { color: var(--text); }
+
+  .error-text {
+    color: #B04A3A;
+    font-size: 0.88rem;
+    margin-top: 10px;
+    min-height: 1.2em;
+  }
+
+  .lang-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 22px;
+    background: var(--soft);
+    padding: 5px;
+    border-radius: 12px;
+  }
+  .lang-toggle button {
+    flex: 1;
+    padding: 9px 0;
+    background: transparent;
+    border-radius: 9px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .lang-toggle button.active {
+    background: var(--primary);
+    color: white;
+  }
+
+  .consent-box {
+    background: var(--soft);
+    border-radius: 14px;
+    padding: 16px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text);
+    max-height: 220px;
+    overflow-y: auto;
+    margin-bottom: 6px;
+  }
+
+  .consent-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 14px;
+    background: var(--soft);
+    border-radius: 12px;
+  }
+  .consent-check input { width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; }
+  .consent-check span { font-size: 0.9rem; line-height: 1.5; }
+
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .lang-note {
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  /* Holding screen */
+  .holding-illustration {
+    width: 84px; height: 84px;
+    margin: 0 auto 20px;
+    border-radius: 50%;
+    background: var(--soft);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.2rem;
+    animation: breathe 3.2s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); opacity: 0.85; }
+    50% { transform: scale(1.08); opacity: 1; }
+  }
+  .countdown-pill {
+    display: inline-block;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 8px 16px;
+    border-radius: 999px;
+    margin-top: 6px;
+  }
+
+  /* Progress dots for the check-in wizard */
+  .progress-dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 22px;
+  }
+  .progress-dots .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border);
+    transition: background 0.25s ease, transform 0.25s ease;
+  }
+  .progress-dots .dot.done { background: var(--primary); }
+  .progress-dots .dot.current { background: var(--primary); transform: scale(1.4); }
+
+  .substep { display: none; }
+  .substep.active { display: block; animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Stress slider */
+  .slider-wrap { padding: 6px 4px 0; }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--primary);
+    height: 6px;
+  }
+  .slider-labels {
+    display: flex; justify-content: space-between;
+    font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;
+  }
+  .slider-value {
+    text-align: center;
+    font-size: 2.4rem;
+    font-weight: 700;
+    color: var(--primary);
+    margin: 6px 0 2px;
+  }
+
+  /* Recording */
+  .mic-wrap { text-align: center; padding: 10px 0 6px; }
+  .mic-btn {
+    width: 92px; height: 92px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    font-size: 2rem;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto;
+    box-shadow: 0 6px 20px rgba(47, 122, 111, 0.35);
+    transition: transform 0.15s ease, background 0.2s ease;
+  }
+  .mic-btn:active { transform: scale(0.95); }
+  .mic-btn.recording {
+    background: #C0473A;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(192, 71, 58, 0.4); }
+    50% { box-shadow: 0 0 0 14px rgba(192, 71, 58, 0); }
+  }
+  .rec-timer {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-top: 16px;
+    color: var(--text);
+  }
+  .rec-hint {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .rec-status-ok { color: var(--primary); font-weight: 600; }
+
+  /* Checklist chips */
+  .chip-group { margin-bottom: 16px; }
+  .chip-group-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: var(--soft);
+    border: 1.5px solid var(--border);
+    font-size: 0.88rem;
+    color: var(--text);
+    transition: all 0.15s ease;
+  }
+  .chip.selected {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+  }
+
+  .step-nav { display: flex; gap: 10px; margin-top: 22px; }
+  .step-nav .btn-primary { margin-top: 0; }
+  .step-nav .btn-back {
+    flex: 0 0 auto;
+    padding: 15px 18px;
+    background: var(--soft);
+    color: var(--text-muted);
+    border-radius: 14px;
+    font-weight: 600;
+  }
+
+  /* Thank you screen */
+  .success-mark {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2rem;
+    margin: 0 auto 20px;
+    animation: pop 0.4s ease;
+  }
+  @keyframes pop {
+    0% { transform: scale(0.6); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .center { text-align: center; }
+  .hidden { display: none !important; }
+  [data-lang-block] { display: none; }
+  [data-lang-block].active { display: block; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>Student Wellbeing Check-In</h1>
+  </div>
+
+  <!-- SCREEN 1: WELCOME GATE -->
+  <section id="screen-gate" class="screen active">
+    <div class="card">
+      <h2 class="title">Welcome back 👋</h2>
+      <p class="subtitle">Enter your check-in token to begin. It's the code you were given when you joined this study.</p>
+      <label for="token-input">Access token</label>
+      <input type="text" id="token-input" placeholder="e.g. a1b2-c3d4-e5f6" autocomplete="off" autocapitalize="off" />
+      <button class="btn-primary" id="gate-continue-btn">Continue</button>
+      <div class="error-text" id="gate-error"></div>
+    </div>
+  </section>
+
+  <!-- SCREEN 2: FIRST-TIME REGISTRATION -->
+  <section id="screen-register" class="screen">
+    <div class="card">
+      <div class="lang-toggle">
+        <button data-lang="en" class="active">English</button>
+        <button data-lang="si">සිංහල</button>
+        <button data-lang="ta">தமிழ்</button>
+      </div>
+
+      <div data-lang-block data-lang="en" class="active">
+        <h2 class="title">Before we begin</h2>
+        <p class="subtitle">This is a quick, three-session check-in used for a university research study on academic stress. This study collects self-talk text, a short speech recording, and self-reported behavioral information from undergraduate students to test a computer-based system designed to detect early signs of academic stress and cognitive drift. This system is not a medical or clinical tool, and it does not provide a diagnosis. All data collected is completely anonymous — no personal information is collected at any point. The purpose of this study is to help identify academic stress and burnout at an early stage, so that better support can be offered to students in the future. We encourage you to share your honest feelings about your studies and workload — there are no right or wrong answers here. Your participation is entirely voluntary and genuinely valuable to this research — thank you for supporting it.</p>
+        <div class="consent-box">
+          <strong>Informed consent.</strong> Your participation is voluntary. Your responses (written, spoken, and checklist answers) will be stored securely and used only for this research study. Your name is not linked to your responses in the research data — only your check-in token is. If you have questions, please reach out.
+          <br /><br />
+          <strong>Please note:</strong> the written and spoken responses in each check-in session should be given in English, since the analysis system currently only supports the English language.
+        </div>
+      </div>
+
+      <div data-lang-block data-lang="si">
+        <h2 class="title">ආරම්භ කිරීමට පෙර</h2>
+        <p class="subtitle">මේක විශ්වවිද්‍යාල සිසුන්ගේ අධ්‍යයන පීඩනය (stress) ගැන කෙරෙන පර්යේෂණයකට අදාළ කෙටි සොයාබැලීමක්. මේක සැසි (sessions) 3කින් කෙරෙන්නක්. පීඩනය සහ අවධානය ගිලිහී යාම (cognitive drift) කලින්ම හඳුනාගන්න පුළුවන් පරිගණක පද්ධතියක් පරීක්ෂා කරලා බලන්න, උපාධි අපේක්ෂකයන්ගේ සිතුවිලි සටහන්, කෙටි හඬ පටයක් සහ එදිනෙදා පුරුදු පිළිබඳ විස්තර ටිකක් මේ හරහා අපි ලබාගන්නවා. හැබැයි මේක වෛද්‍යමය පරීක්ෂණයක්වත්, රෝග විනිශ්චයක් ලබා දෙන එකක්වත් නෙවෙයි.
+
+මෙහි එකතු කරන කිසිදු තොරතුරකින් ඔබේ අනන්‍යතාව හෙළි වෙන්නේ නෑ — සියල්ල සම්පූර්ණයෙන්ම නිර්නාමිකයි. මේ අධ්‍යයනයේ අරමුණ අධ්‍යයන පීඩනය සහ අධික වෙහෙස නිසා ඇතිවන මානසික විඩාව (burnout) මුල් අවධියේදීම හඳුනාගෙන, ඉදිරියේදී සිසුන්ට ඊට වඩා හොඳ සහයක් ලබා දීමයි. ඉතින් ඔබේ අධ්‍යයන කටයුතු සහ වැඩ ප්‍රමාණය ගැන ඔබට අවංකවම දැනෙන දේ ලියන්න — මෙහි හරි හෝ වැරදි පිළිතුරු කියලා දෙයක් නෑ. මේ සඳහා සහභාගී වීම සම්පූර්ණයෙන්ම ඔබේ කැමැත්ත මත සිදුවන දෙයක් වගේම, මේ පර්යේෂණයට එය ඉතාම වටිනා දායකත්වයක්. සහයෝගයට බොහොම ස්තූතියි!</p>
+        <div class="consent-box">
+          <strong>දැනුවත් කැමැත්ත.</strong> ඔබගේ සහභාගීත්වය සම්පූර්ණයෙන්ම ස්වේච්ඡාවෙන් සිදුවන්නකි. ඔබ ලබා දෙන පිළිතුරු (ලිඛිත සටහන්, හඬ පට සහ පිරික්සුම් ලැයිස්තු පිළිතුරු) ඉතා ආරක්ෂිතව තබා ගන්නා අතර, ඒවා භාවිත කරනුයේ මෙම පර්යේෂණ අධ්‍යයනය සඳහා පමණි. පර්යේෂණ දත්ත තුළ ඔබගේ නම කිසිදු ලෙසකින් මෙම පිළිතුරු සමඟ සම්බන්ධ නොකෙරේ — ඒ සඳහා භාවිත වන්නේ ඔබගේ check-in token එක පමණි. ඔබට කිසියම් ගැටලුවක් ඇත්නම්, කරුණාකර අප හා සම්බන්ධ වන්න.
+          <br /><br />
+          <strong>කරුණාකර සලකන්න:</strong> එක් එක් check-in සැසියේදී ලබා දෙන ලිඛිත සහ කථන පිළිතුරු ඉංග්‍රීසි භාෂාවෙන් ලබා දිය යුතුය, මන්ද විශ්ලේෂණ පද්ධතිය දැනට සහාය දක්වන්නේ ඉංග්‍රීසි භාෂාවට පමණි.</div>
+      </div>
+
+      <div data-lang-block data-lang="ta">
+        <h2 class="title">தொடங்குவதற்கு முன்</h2>
+        <p class="subtitle">இது பல்கலைக்கழக மாணவர்களின் கல்விசார் மன அழுத்தம் (academic stress) தொடர்பான ஆய்வுக்காக மூன்று கட்டங்களாக மேற்கொள்ளப்படும் ஒரு சுருக்கமான மீளாய்வு ஆகும். கல்விசார் மன அழுத்தம் மற்றும் கவனக் குவிப்புக் குறைபாடு (cognitive drift) ஆகியவற்றை ஆரம்ப நிலையிலேயே கண்டறியக்கூடிய கணினி அமைப்பொன்றைப் பரிசோதிப்பதற்காக, இளங்கலை மாணவர்களிடமிருந்து சுய-சிந்தனைப் பதிவுகள் (self-talk text), ஒரு சிறிய குரல் பதிவு மற்றும் நடத்தை சார்ந்த தகவல்கள் பெறப்படுகின்றன. இது ஒரு மருத்துவ ரீதியான கருவி அல்ல என்பதோடு, எந்தவித மருத்துவப் பரிசோதனை முடிவுகளையும் (diagnosis) இது வழங்காது.
+
+இங்கு சேகரிக்கப்படும் அனைத்துத் தகவல்களும் முற்றிலும் பெயரற்றவை (anonymous) — எந்தவொரு கட்டத்திலும் உங்களது தனிப்பட்ட தகவல்கள் பெறப்பட மாட்டாது. கல்விசார் மன அழுத்தம் மற்றும் அதிக வேலைப் பளுவினால் ஏற்படும் மனச்சோர்வை (burnout) முன்கூட்டியே இனங்கண்டு, எதிர்காலத்தில் மாணவர்களுக்குச் சிறந்த ஆதரவை வழங்குவதே இந்த ஆய்வின் நோக்கமாகும். உங்கள் கல்வி நடவடிக்கைகள் மற்றும் வேலைப் பளு குறித்து உங்களுக்குத் தோன்றும் உண்மையான உணர்வுகளைப் பகிர்ந்துகொள்ளுமாறு கேட்டுக்கொள்கிறோம் — இதில் சரியான அல்லது தவறான பதில்கள் என்று எதுவுமில்லை. உங்கள் பங்கேற்பு முற்றிலும் உங்கள் சுய விருப்பத்தின் அடிப்படையிலானது என்பதோடு, இந்த ஆய்விற்கு அது மிகவும் பெறுமதி வாய்ந்த பங்களிப்பாகும் — உங்கள் ஒத்துழைப்பிற்கு நன்றி.</p>
+        <div class="consent-box">
+          <strong>அறிந்த சம்மதம்.</strong> அறிவிக்கப்பட்ட ஒப்புதல் (Informed consent). உங்கள் பங்களிப்பு முற்றிலும் உங்கள் சுய விருப்பத்திற்கு உட்பட்டது. உங்கள் பதில்கள் (எழுத்து வடிவிலானவை, குரல் பதிவுகள் மற்றும் சரிபார்ப்புப் பட்டியல் விடைகள்) மிகவும் பாதுகாப்பாக வைக்கப்பட்டு, இந்த ஆராய்ச்சி ஆய்வுக்கு மட்டுமே பயன்படுத்தப்படும். ஆராய்ச்சித் தரவுகளில் உங்கள் பெயர் எந்த இடத்திலும் இணைக்கப்பட மாட்டாது — அதற்குப் பதிலாக உங்கள் check-in token மட்டுமே பயன்படுத்தப்படும். ஏதேனும் சந்தேகங்கள் அல்லது கேள்விகள் இருந்தால், தயங்காமல் எங்களைத் தொடர்பு கொள்ளவும்.
+          <br /><br />
+          <strong>தயவுசெய்து கவனிக்கவும்:</strong> ஒவ்வொரு check-in அமர்வின்போதும் வழங்கப்படும் எழுத்து மற்றும் பேச்சு பதில்கள் ஆங்கில மொழியில் வழங்கப்பட வேண்டும், ஏனெனில் பகுப்பாய்வு அமைப்பு தற்போது ஆங்கில மொழியை மட்டுமே ஆதரிக்கிறது.</div>
+      </div>
+
+      <div class="consent-check">
+        <input type="checkbox" id="consent-checkbox" />
+        <span id="consent-check-label">I have read the above and I agree to participate in this study.</span>
+      </div>
+
+      <label for="reg-year">Academic year</label>
+      <select id="reg-year">
+        <option value="">Select…</option>
+        <option>1st Year</option>
+        <option>2nd Year</option>
+        <option>3rd Year</option>
+        <option>4th Year</option>
+      </select>
+
+      <label for="reg-stream">Stream of study (Faculty)</label>
+      <select id="reg-stream">
+        <option value="">Select…</option>
+        <option>Computing</option>
+        <option>Engineering</option>
+        <option>Science</option>
+        <option>Management</option>
+        <option>Other</option>
+      </select>
+
+      <label for="reg-email">Contact email <span style="font-weight:400; text-transform:none; color:var(--text-muted);">(required — used only for session reminders)</span></label>
+      <input type="email" id="reg-email" placeholder="you@example.com" required />
+
+      <button class="btn-primary" id="register-submit-btn" disabled>Continue to Session 1</button>
+      <div class="error-text" id="register-error"></div>
+    </div>
+  </section>
+
+  <!-- SCREEN 3: HOLDING SCREEN -->
+  <section id="screen-holding" class="screen">
+    <div class="card center">
+      <div class="holding-illustration">🌿</div>
+      <h2 class="title">You've already checked in recently</h2>
+      <p class="subtitle">Take a break, breathe, and come back soon — there's nothing else to do right now.</p>
+      <div class="countdown-pill" id="holding-countdown">Unlocks in a few hours</div>
+      <button class="btn-secondary" id="holding-refresh-btn">Check again</button>
+    </div>
+  </section>
+
+  <!-- SCREEN 4: CORE CHECK-IN -->
+  <section id="screen-checkin" class="screen">
+    <div class="card">
+      <div class="progress-dots" id="progress-dots"></div>
+
+      <!-- Step A: stress slider -->
+      <div class="substep active" data-step="A">
+        <h2 class="title">How are you feeling today?</h2>
+        <p class="subtitle">Move the slider to where it feels right — there's no wrong answer.</p>
+        <div class="slider-wrap">
+          <div class="slider-value" id="stress-value">5</div>
+          <input type="range" id="stress-slider" min="1" max="10" value="5" />
+          <div class="slider-labels"><span>Very calm</span><span>Very stressed</span></div>
+        </div>
+        <div class="step-nav"><button class="btn-primary" data-next="B">Next</button></div>
+      </div>
+
+      <!-- Step B: self-talk -->
+      <div class="substep" data-step="B">
+        <h2 class="title">What's on your mind?</h2>
+        <p class="subtitle">Write a little about how your studies have been going lately — anything at all.</p>
+        <div class="lang-note">Please write your response in English.</div>
+        <textarea id="self-talk-text" placeholder="I've been feeling..."></textarea>
+        <div class="step-nav">
+          <button class="btn-back" data-back="A">Back</button>
+          <button class="btn-primary" data-next="C">Next</button>
+        </div>
+      </div>
+
+      <!-- Step C: voice -->
+      <div class="substep" data-step="C">
+        <h2 class="title">Now, in your own voice</h2>
+        <p class="subtitle">Talk for at least 30 seconds about the same thing — how studying has felt lately. Just speak naturally.</p>
+        <div class="lang-note">Please speak in English during this recording.</div>
+        <div class="mic-wrap">
+          <button class="mic-btn" id="mic-btn">🎙️</button>
+          <div class="rec-timer" id="rec-timer">0:00</div>
+          <div class="rec-hint" id="rec-hint">Tap the mic to start recording</div>
+        </div>
+        <div class="step-nav">
+          <button class="btn-back" data-back="B">Back</button>
+          <button class="btn-primary" id="rec-next-btn" data-next="D" disabled>Next</button>
+        </div>
+      </div>
+
+      <!-- Step D: checklist -->
+      <div class="substep" data-step="D">
+        <h2 class="title">In your recent study sessions...</h2>
+        <p class="subtitle">Tap anything that's applied to you — there's no minimum or maximum.</p>
+        <div id="checklist-container"></div>
+        <div class="step-nav">
+          <button class="btn-back" data-back="C">Back</button>
+          <button class="btn-primary" id="checklist-next-btn">Next</button>
+        </div>
+      </div>
+
+      <!-- Step E: UX feedback (session 3 only) -->
+      <div class="substep" data-step="E">
+        <h2 class="title">One last thing</h2>
+        <p class="subtitle">How did it feel using this space over your three check-ins?</p>
+        <div class="slider-wrap">
+          <div class="slider-value" id="ux-value">3</div>
+          <input type="range" id="ux-slider" min="1" max="5" value="3" />
+          <div class="slider-labels"><span>Felt robotic</span><span>Felt like a caring check-in</span></div>
+        </div>
+        <label for="ux-text">Anything you'd tell us? (optional)</label>
+        <textarea id="ux-text" placeholder="It felt..." style="min-height:80px;"></textarea>
+        <div class="step-nav">
+          <button class="btn-back" data-back="D">Back</button>
+          <button class="btn-primary" id="submit-checkin-btn">Submit check-in</button>
+        </div>
+      </div>
+
+      <div class="error-text" id="checkin-error"></div>
+    </div>
+  </section>
+
+  <!-- SCREEN 5: THANK YOU -->
+  <section id="screen-thankyou" class="screen">
+    <div class="card center">
+      <div class="success-mark">✓</div>
+      <h2 class="title" id="thankyou-title">Thank you for checking in</h2>
+      <p class="subtitle" id="thankyou-subtitle">Your responses are safely saved. We'll see you for your next check-in soon.</p>
+    </div>
+  </section>
+
+  <!-- SCREEN 6: ALL SESSIONS DONE -->
+  <section id="screen-complete" class="screen">
+    <div class="card center">
+      <div class="success-mark">🎉</div>
+      <h2 class="title">You've completed all three check-ins</h2>
+      <p class="subtitle">Thank you so much for taking part in this study — your time and honesty genuinely help this research.</p>
+    </div>
+  </section>
+
+  <!-- SCREEN: SAVING (shown during submit) -->
+  <section id="screen-saving" class="screen">
+    <div class="card center">
+      <div class="holding-illustration">💾</div>
+      <h2 class="title">Saving your check-in…</h2>
+      <p class="subtitle">Please don't close this page — this only takes a moment.</p>
+    </div>
+  </section>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =========================================================
+   CONFIG — fill these in from Supabase > Project Settings > Data API
+   ========================================================= */
+const SUPABASE_URL = "https://sdaifdtmbbplrplvnvlg.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkYWlmZHRtYmJwbHJwbHZudmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAyNjM0MzgsImV4cCI6MjEwNTgzOTQzOH0.LP_mK2ddYydtBuJLu5BMuBX4I_icco1R7ocihrHJJWQ";
+const BUCKET_NAME = "voice-recordings";
+const MIN_RECORDING_SECONDS = 30;
+const MAX_RECORDING_SECONDS = 90;
+const SESSION_GAP_HOURS = 24;
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* =========================================================
+   STATE
+   ========================================================= */
+const state = {
+  token: null,
+  student: null,          // the row from `students`
+  sessionNumber: null,    // 1, 2 or 3
+  pageLoadTime: null,     // for completion_time_seconds
+  checklist: {},          // { B1: true, ... }
+  recordingBlob: null,
+  recordingDuration: 0,
+  audioCtx: null,
+  processorNode: null,
+  micStream: null,
+  recStartTime: null,
+  recTimerHandle: null,
+  audioChunks: []
+};
+
+const CHECKLIST_ITEMS = [
+  { group: "Attention and focus", items: [
+    ["B1", "Difficulty staying focused"],
+    ["B2", "Frequently distracted"],
+    ["B3", "Zoning out during study"]
+  ]},
+  { group: "Memory", items: [
+    ["B4", "Re-reading without understanding"],
+    ["B5", "Forgetting what I studied"],
+    ["B6", "Mind going blank"]
+  ]},
+  { group: "Mental energy", items: [
+    ["B7", "Mentally exhausted quickly"],
+    ["B8", "Thinking feels slower than usual"],
+    ["B9", "Difficulty forming clear thoughts"]
+  ]},
+  { group: "Avoidance", items: [
+    ["B10", "Postponing study tasks"],
+    ["B11", "Giving up earlier than planned"],
+    ["B12", "Feeling no point in studying"]
+  ]},
+  { group: "Physical", items: [
+    ["B13", "Headache or physical tension"],
+    ["B14", "Sleep difficulty due to worry"],
+    ["B15", "Physically restless"]
+  ]}
+];
+
+/* =========================================================
+   SCREEN HELPERS
+   ========================================================= */
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+  window.scrollTo(0, 0);
+}
+
+function showSubstep(step) {
+  document.querySelectorAll(".substep").forEach(s => s.classList.remove("active"));
+  document.querySelector(`.substep[data-step="${step}"]`).classList.add("active");
+  renderProgressDots(step);
+}
+
+function renderProgressDots(currentStep) {
+  const steps = state.sessionNumber === 3 ? ["A","B","C","D","E"] : ["A","B","C","D"];
+  const wrap = document.getElementById("progress-dots");
+  wrap.innerHTML = "";
+  const currentIndex = steps.indexOf(currentStep);
+  steps.forEach((s, i) => {
+    const d = document.createElement("div");
+    d.className = "dot" + (i < currentIndex ? " done" : "") + (i === currentIndex ? " current" : "");
+    wrap.appendChild(d);
+  });
+}
+
+/* =========================================================
+   SCREEN 1: TOKEN GATE
+   ========================================================= */
+document.getElementById("gate-continue-btn").addEventListener("click", checkToken);
+document.getElementById("token-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") checkToken();
+});
+
+async function checkToken() {
+  const tokenInput = document.getElementById("token-input");
+  const errorEl = document.getElementById("gate-error");
+  errorEl.textContent = "";
+  const token = tokenInput.value.trim().toLowerCase();
+
+  if (!token) {
+    errorEl.textContent = "Please enter your access token.";
+    return;
+  }
+
+  const btn = document.getElementById("gate-continue-btn");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+
+  const { data, error } = await supabase
+    .from("students")
+    .select("*")
+    .eq("participant_token", token)
+    .maybeSingle();
+
+  btn.disabled = false;
+  btn.textContent = "Continue";
+
+  if (error) {
+    errorEl.textContent = "Something went wrong. Please try again.";
+    console.error(error);
+    return;
+  }
+  if (!data) {
+    errorEl.textContent = "That token wasn't recognised. Please check and try again.";
+    return;
+  }
+
+  state.token = token;
+  state.student = data;
+  routeAfterLogin();
+}
+
+function routeAfterLogin() {
+  if (!state.student.consent_given) {
+    showScreen("screen-register");
+    return;
+  }
+  const next = computeNextSession(state.student);
+  if (next.stage === "checkin") {
+    startCheckin(next.sessionNumber);
+  } else if (next.stage === "holding") {
+    showHolding(next.unlockAt);
+  } else {
+    showScreen("screen-complete");
+  }
+}
+
+/* Decide what the student sees next based on their three booleans/timestamps */
+function computeNextSession(student) {
+  if (!student.session1_complete) {
+    return { stage: "checkin", sessionNumber: 1 };
+  }
+  if (!student.session2_complete) {
+    return gateCheck(student.session1_completed_at, 2);
+  }
+  if (!student.session3_complete) {
+    return gateCheck(student.session2_completed_at, 3);
+  }
+  return { stage: "done" };
+}
+
+function gateCheck(previousTimestamp, sessionNumber) {
+  const unlockAt = new Date(previousTimestamp).getTime() + SESSION_GAP_HOURS * 3600 * 1000;
+  if (Date.now() >= unlockAt) {
+    return { stage: "checkin", sessionNumber };
+  }
+  return { stage: "holding", unlockAt, sessionNumber };
+}
+
+/* =========================================================
+   SCREEN 2: REGISTRATION (with language toggle)
+   ========================================================= */
+document.querySelectorAll(".lang-toggle button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".lang-toggle button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    const lang = btn.dataset.lang;
+    document.querySelectorAll("[data-lang-block]").forEach(block => {
+      block.classList.toggle("active", block.dataset.lang === lang);
+    });
+    const labels = {
+      en: "I have read the above and I agree to participate in this study.",
+      si: "ඉහත සඳහන් දේ මා කියවා ඇති අතර මෙම අධ්‍යයනයට සහභාගී වීමට එකඟ වෙමි.",
+      ta: "மேலே உள்ளதை நான் படித்துவிட்டேன், இந்த ஆய்வில் பங்கேற்க சம்மதிக்கிறேன்."
+    };
+    document.getElementById("consent-check-label").textContent = labels[lang];
+  });
+});
+
+// Basic, standard email shape check — not exhaustive, just catches obvious typos
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function checkRegisterFormValid() {
+  const consent = document.getElementById("consent-checkbox").checked;
+  const year = document.getElementById("reg-year").value;
+  const stream = document.getElementById("reg-stream").value;
+  const email = document.getElementById("reg-email").value.trim();
+  document.getElementById("register-submit-btn").disabled =
+    !(consent && year && stream && isValidEmail(email));
+}
+["consent-checkbox"].forEach(id =>
+  document.getElementById(id).addEventListener("change", checkRegisterFormValid)
+);
+["reg-year", "reg-stream"].forEach(id =>
+  document.getElementById(id).addEventListener("change", checkRegisterFormValid)
+);
+document.getElementById("reg-email").addEventListener("input", checkRegisterFormValid);
+
+document.getElementById("register-submit-btn").addEventListener("click", submitRegistration);
+
+async function submitRegistration() {
+  const errorEl = document.getElementById("register-error");
+  errorEl.textContent = "";
+
+  const email = document.getElementById("reg-email").value.trim();
+  if (!isValidEmail(email)) {
+    errorEl.textContent = "Please enter a valid email address — it's required so we can send your session reminders.";
+    return;
+  }
+
+  const btn = document.getElementById("register-submit-btn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  const payload = {
+    consent_given: true,
+    academic_year: document.getElementById("reg-year").value,
+    stream: document.getElementById("reg-stream").value,
+    contact_email: email
+  };
+
+  const { data, error } = await supabase
+    .from("students")
+    .update(payload)
+    .eq("participant_token", state.token)
+    .select()
+    .single();
+
+  btn.disabled = false;
+  btn.textContent = "Continue to Session 1";
+
+  if (error) {
+    errorEl.textContent = "Couldn't save your details. Please try again.";
+    console.error(error);
+    return;
+  }
+
+  state.student = data;
+  startCheckin(1);
+}
+
+/* =========================================================
+   SCREEN 3: HOLDING SCREEN
+   ========================================================= */
+let holdingUnlockAt = null;
+
+function showHolding(unlockAt) {
+  holdingUnlockAt = unlockAt;
+  renderHoldingCountdown();
+  showScreen("screen-holding");
+}
+
+function renderHoldingCountdown() {
+  const msLeft = holdingUnlockAt - Date.now();
+  const el = document.getElementById("holding-countdown");
+  if (msLeft <= 0) {
+    el.textContent = "Ready now — tap “Check again”";
+    return;
+  }
+  const hours = Math.floor(msLeft / 3600000);
+  const mins = Math.floor((msLeft % 3600000) / 60000);
+  if (hours >= 1) {
+    el.textContent = `Unlocks in about ${hours} hour${hours !== 1 ? "s" : ""}`;
+  } else {
+    el.textContent = `Unlocks in about ${mins} minute${mins !== 1 ? "s" : ""}`;
+  }
+}
+
+document.getElementById("holding-refresh-btn").addEventListener("click", () => {
+  if (Date.now() >= holdingUnlockAt) {
+    routeAfterLogin();
+  } else {
+    renderHoldingCountdown();
+  }
+});
+
+/* =========================================================
+   SCREEN 4: CORE CHECK-IN
+   ========================================================= */
+function startCheckin(sessionNumber) {
+  state.sessionNumber = sessionNumber;
+  state.pageLoadTime = Date.now();
+  state.checklist = {};
+  state.recordingBlob = null;
+  state.recordingDuration = 0;
+
+  document.getElementById("self-talk-text").value = "";
+  document.getElementById("stress-slider").value = 5;
+  document.getElementById("stress-value").textContent = "5";
+  resetRecordingUI();
+  renderChecklist();
+
+  document.querySelector('.substep[data-step="E"]').style.display =
+    sessionNumber === 3 ? "" : "none";
+  document.getElementById("checklist-next-btn").textContent =
+    sessionNumber === 3 ? "Next" : "Submit check-in";
+
+  showSubstep("A");
+  showScreen("screen-checkin");
+}
+
+// step navigation
+document.querySelectorAll("[data-next]").forEach(btn => {
+  btn.addEventListener("click", () => showSubstep(btn.dataset.next));
+});
+document.querySelectorAll("[data-back]").forEach(btn => {
+  btn.addEventListener("click", () => showSubstep(btn.dataset.back));
+});
+
+// Step A: stress slider
+document.getElementById("stress-slider").addEventListener("input", e => {
+  document.getElementById("stress-value").textContent = e.target.value;
+});
+
+// Step E: ux slider
+document.getElementById("ux-slider").addEventListener("input", e => {
+  document.getElementById("ux-value").textContent = e.target.value;
+});
+
+/* ---- Step D: checklist chips ---- */
+function renderChecklist() {
+  const container = document.getElementById("checklist-container");
+  container.innerHTML = "";
+  CHECKLIST_ITEMS.forEach(group => {
+    const groupEl = document.createElement("div");
+    groupEl.className = "chip-group";
+    const label = document.createElement("div");
+    label.className = "chip-group-label";
+    label.textContent = group.group;
+    groupEl.appendChild(label);
+
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    group.items.forEach(([code, text]) => {
+      const chip = document.createElement("button");
+      chip.className = "chip";
+      chip.textContent = text;
+      chip.dataset.code = code;
+      chip.addEventListener("click", () => {
+        state.checklist[code] = !state.checklist[code];
+        chip.classList.toggle("selected", !!state.checklist[code]);
+      });
+      chips.appendChild(chip);
+    });
+    groupEl.appendChild(chips);
+    container.appendChild(groupEl);
+  });
+}
+
+/* ---- Step C: voice recording (raw PCM -> WAV, no MediaRecorder) ---- */
+document.getElementById("mic-btn").addEventListener("click", toggleRecording);
+
+function resetRecordingUI() {
+  document.getElementById("rec-timer").textContent = "0:00";
+  document.getElementById("rec-hint").textContent = "Tap the mic to start recording";
+  document.getElementById("rec-hint").classList.remove("rec-status-ok");
+  document.getElementById("mic-btn").classList.remove("recording");
+  document.getElementById("rec-next-btn").disabled = true;
+}
+
+async function toggleRecording() {
+  const micBtn = document.getElementById("mic-btn");
+  if (!state.recStartTime) {
+    // start
+    try {
+      state.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      document.getElementById("rec-hint").textContent =
+        "We couldn't hear you — please allow microphone access and tap the mic again.";
+      return;
+    }
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    state.audioCtx = new AudioCtx();
+    const source = state.audioCtx.createMediaStreamSource(state.micStream);
+    state.processorNode = state.audioCtx.createScriptProcessor(4096, 1, 1);
+    state.audioChunks = [];
+
+    state.processorNode.onaudioprocess = e => {
+      const input = e.inputBuffer.getChannelData(0);
+      state.audioChunks.push(new Float32Array(input));
+    };
+    // route through a silent gain node so the mic isn't echoed to speakers
+    const silentGain = state.audioCtx.createGain();
+    silentGain.gain.value = 0;
+    source.connect(state.processorNode);
+    state.processorNode.connect(silentGain);
+    silentGain.connect(state.audioCtx.destination);
+
+    state.recStartTime = Date.now();
+    micBtn.classList.add("recording");
+    micBtn.textContent = "⏹️";
+    document.getElementById("rec-hint").textContent = `Keep going until at least ${MIN_RECORDING_SECONDS}s`;
+
+    state.recTimerHandle = setInterval(updateRecTimer, 250);
+  } else {
+    stopRecording();
+  }
+}
+
+function updateRecTimer() {
+  const elapsed = (Date.now() - state.recStartTime) / 1000;
+  const m = Math.floor(elapsed / 60);
+  const s = Math.floor(elapsed % 60).toString().padStart(2, "0");
+  document.getElementById("rec-timer").textContent = `${m}:${s}`;
+
+  if (elapsed >= MIN_RECORDING_SECONDS) {
+    document.getElementById("rec-hint").textContent = "You can stop any time now";
+    document.getElementById("rec-hint").classList.add("rec-status-ok");
+    document.getElementById("rec-next-btn").disabled = false;
+  }
+  if (elapsed >= MAX_RECORDING_SECONDS) {
+    stopRecording();
+  }
+}
+
+function stopRecording() {
+  clearInterval(state.recTimerHandle);
+  state.recordingDuration = (Date.now() - state.recStartTime) / 1000;
+
+  state.processorNode.disconnect();
+  state.audioCtx.close();
+  state.micStream.getTracks().forEach(t => t.stop());
+
+  const sampleRate = state.audioCtx.sampleRate;
+  const merged = mergeFloat32(state.audioChunks);
+  state.recordingBlob = encodeWAV(merged, sampleRate);
+
+  document.getElementById("mic-btn").classList.remove("recording");
+  document.getElementById("mic-btn").textContent = "🎙️";
+  state.recStartTime = null;
+
+  if (state.recordingDuration >= MIN_RECORDING_SECONDS) {
+    document.getElementById("rec-hint").textContent = "Recorded — you're all set";
+    document.getElementById("rec-hint").classList.add("rec-status-ok");
+    document.getElementById("rec-next-btn").disabled = false;
+  } else {
+    document.getElementById("rec-hint").textContent =
+      `That was only ${Math.round(state.recordingDuration)}s — please record at least ${MIN_RECORDING_SECONDS}s. Tap the mic to try again.`;
+    document.getElementById("rec-next-btn").disabled = true;
+  }
+}
+
+function mergeFloat32(chunks) {
+  let length = 0;
+  chunks.forEach(c => (length += c.length));
+  const result = new Float32Array(length);
+  let offset = 0;
+  chunks.forEach(c => {
+    result.set(c, offset);
+    offset += c.length;
+  });
+  return result;
+}
+
+// Minimal, dependency-free 16-bit PCM WAV encoder.
+// This keeps the file format compatible with pipeline.py's
+// _decode_wav_bytes(), which reads plain WAV via Python's `wave` module.
+function encodeWAV(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);        // PCM
+  view.setUint16(22, 1, true);        // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([view], { type: "audio/wav" });
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+/* ---- Final submit ---- */
+document.getElementById("submit-checkin-btn").addEventListener("click", submitCheckin);
+
+// Sessions 1 & 2 have no Step E — this button submits directly for them,
+// and only advances to the UX-feedback step on session 3.
+document.getElementById("checklist-next-btn").addEventListener("click", () => {
+  if (state.sessionNumber === 3) {
+    showSubstep("E");
+  } else {
+    submitCheckin();
+  }
+});
+
+async function submitCheckin() {
+  const errorEl = document.getElementById("checkin-error");
+  errorEl.textContent = "";
+  showScreen("screen-saving");
+
+  const completionSeconds = Math.round((Date.now() - state.pageLoadTime) / 1000);
+  const audioPath = `${state.token}/session${state.sessionNumber}.wav`;
+
+  try {
+    // 1. upload audio
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(audioPath, state.recordingBlob, { contentType: "audio/wav", upsert: true });
+    if (uploadError) throw new Error("audio upload failed: " + uploadError.message);
+
+    // 2. insert the response row
+    const responsePayload = {
+      student_token: state.token,
+      session_number: state.sessionNumber,
+      self_talk_text: document.getElementById("self-talk-text").value,
+      checklist_answers: fullChecklistObject(),
+      audio_path: audioPath,
+      audio_duration_seconds: state.recordingDuration,
+      stress_label: parseInt(document.getElementById("stress-slider").value, 10),
+      completion_time_seconds: completionSeconds
+    };
+    if (state.sessionNumber === 3) {
+      responsePayload.ux_feedback_scale = parseInt(document.getElementById("ux-slider").value, 10);
+      responsePayload.ux_feedback_text = document.getElementById("ux-text").value || null;
+    }
+
+    const { error: insertError } = await supabase.from("session_responses").insert(responsePayload);
+    if (insertError) throw new Error("saving responses failed: " + insertError.message);
+
+    // 3. flip the boolean + timestamp for this session, only after the above succeeded
+    const updatePayload = {};
+    updatePayload[`session${state.sessionNumber}_complete`] = true;
+    updatePayload[`session${state.sessionNumber}_completed_at`] = new Date().toISOString();
+
+    const { error: updateError } = await supabase
+      .from("students")
+      .update(updatePayload)
+      .eq("participant_token", state.token);
+    if (updateError) throw new Error("updating progress failed: " + updateError.message);
+
+    showThankYou();
+  } catch (err) {
+    console.error(err);
+    showScreen("screen-checkin");
+    showSubstep(state.sessionNumber === 3 ? "E" : "D");
+    errorEl.textContent = "Something went wrong saving your check-in. Please check your connection and try submitting again.";
+  }
+}
+
+function fullChecklistObject() {
+  const obj = {};
+  CHECKLIST_ITEMS.forEach(group => {
+    group.items.forEach(([code]) => {
+      obj[code] = !!state.checklist[code];
+    });
+  });
+  return obj;
+}
+
+function showThankYou() {
+  const isLast = state.sessionNumber === 3;
+  document.getElementById("thankyou-title").textContent = isLast
+    ? "Thank you for your final check-in"
+    : "Thank you for checking in";
+  document.getElementById("thankyou-subtitle").textContent = isLast
+    ? "Your responses are safely saved. This was your last session — thank you for seeing this through."
+    : `Your responses are safely saved. Come back in about ${SESSION_GAP_HOURS} hours for your next check-in.`;
+  showScreen("screen-thankyou");
+}
+</script>
+</body>
+</html>
